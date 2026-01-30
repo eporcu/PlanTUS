@@ -7,8 +7,6 @@ PlanTUS helps users of transcranial ultrasonic stimulation (TUS) to interactivel
 
 
 # Software dependencies:
-- FSL (https://fsl.fmrib.ox.ac.uk/fsl/docs/#/install/index)
-- Freesurfer (https://surfer.nmr.mgh.harvard.edu/fswiki/DownloadAndInstall)
 - Connectome Workbench (https://humanconnectome.org/software/get-connectome-workbench)
 - SimNIBS (https://simnibs.github.io/simnibs/build/html/installation/simnibs_installer.html)
 
