@@ -23,22 +23,13 @@ import nibabel as nib
 
 
 # -----------------------------------------------------------------------------
-# Utility: dependency check
+# Utility: set paths to dependencies
 # -----------------------------------------------------------------------------
 
-def check_dependencies() -> None:
-    """Print warnings for optional external tools.
-
-    Notes
-    -----
-    * We keep checks for optional tools still used elsewhere:
-      - SimNIBS/charm (mesh I/O)
-      - Connectome Workbench (`wb_command`)
-    """
-    if os.system("charm --version > /dev/null 2>&1") != 0:
-        print("SimNIBS/charm not installed or not on PATH (optional but recommended)!")
-    if os.system("wb_command -version > /dev/null 2>&1") != 0:
-        print("Connectome Workbench not installed (required for several surface ops)!")
+def set_paths(connectome_wb_path=None):
+    global _CONNECTOME_WB_PATH, wb_command_cmd
+    _CONNECTOME_WB_PATH = connectome_wb_path
+    wb_command_cmd = _CONNECTOME_WB_PATH + os.sep + "wb_command"
 
 
 # -----------------------------------------------------------------------------
@@ -136,18 +127,18 @@ def _marching_cubes_from_binary_volume(vol_path: str,
     """
 
     from simnibs.segmentation.marching_cube import marching_cube  # type: ignore
-    
+
     img = nib.load(vol_path)
     vol = img.get_fdata()
     if len(vol.shape) == 4:
         vol = vol[:,:,:,0]
     aff = img.affine
-    
+
     mesh, faces = marching_cube(vol.astype(np.float32), affine=aff)
     verts_mm = mesh.nodes.node_coord
     tri_mask = (mesh.elm.elm_type == 2).ravel()
     faces = mesh.elm.node_number_list[tri_mask, :3].astype(np.int32) - 1  # (M, 3)
-    
+
     return mesh, verts_mm, faces.astype(np.int32)
 
 
@@ -164,15 +155,15 @@ def _write_gifti_surface(vertices_mm: np.ndarray, faces: np.ndarray, out_gii: st
         intent="NIFTI_INTENT_POINTSET",
         datatype=nib.nifti1.data_type_codes['NIFTI_TYPE_FLOAT32'],
         )
-    
+
     faces_da = GiftiDataArray(
         data=np.asarray(faces, dtype=np.int32),
         intent="NIFTI_INTENT_TRIANGLE",
         datatype=nib.nifti1.data_type_codes['NIFTI_TYPE_FLOAT32'],
         )
-    
+
     gii = GiftiImage(darrays=[coords_da, faces_da])
-    
+
     nib.save(gii, out_gii)
 
 
@@ -238,7 +229,7 @@ def convert_simnibs_mesh_to_surfaces(simnibs_mesh_filepath: str,
     from simnibs import mesh_io
 
     os.makedirs(output_path, exist_ok=True)
-    
+
     # Load mesh
     mesh = mesh_io.read_msh(simnibs_mesh_filepath).crop_mesh(tags=list(tags))
 
@@ -255,14 +246,14 @@ def convert_simnibs_mesh_to_surfaces(simnibs_mesh_filepath: str,
     # Faces: filter triangles (elm_type==2), take first 3 node indices, convert 1-based -> 0-based
     tri_mask = (mesh.elm.elm_type == 2).ravel()
     faces = mesh.elm.node_number_list[tri_mask, :3].astype(np.int32) - 1  # (M, 3)
-    
+
     # write gifti
     _write_gifti_surface(vertices, faces, gii_out)
 
     # Write STL directly ------------------------------------------------------
     stl_out = os.path.join(output_path, f"{mesh_name}.stl")
     mesh_io.write_stl(mesh, stl_out)
-    
+
 
 def surf_gii_to_stl_with_simnibs(in_gii: str, out_stl: str, tag: int = 1):
     """
@@ -278,7 +269,7 @@ def surf_gii_to_stl_with_simnibs(in_gii: str, out_stl: str, tag: int = 1):
         Element tag ID (default=1). Used by SimNIBS to group triangles.
     """
     from simnibs.mesh_tools import mesh_io as mio
-    
+
     # Load GIfTI
     gii = nib.load(in_gii)
     coords = gii.darrays[0].data.astype(np.float64)
@@ -291,7 +282,7 @@ def surf_gii_to_stl_with_simnibs(in_gii: str, out_stl: str, tag: int = 1):
 
     # Write STL
     mio.write_stl(msh, out_stl)
-    
+
 
 # -----------------------------------------------------------------------------
 # Surface metrics & helpers (Workbench + Nilearn)
@@ -315,8 +306,8 @@ def compute_surface_metrics(surface_filepath: str) -> Tuple[np.ndarray, np.ndarr
     coords_func = os.path.join(out_dir, f"{base}_coordinates.func.gii")
     norms_func = os.path.join(out_dir, f"{base}_normals.func.gii")
 
-    os.system(f"wb_command -logging OFF -surface-coordinates-to-metric {surface_filepath} {coords_func}")
-    os.system(f"wb_command -logging OFF -surface-normals {surface_filepath} {norms_func}")
+    os.system(f"{wb_command_cmd} -logging OFF -surface-coordinates-to-metric {surface_filepath} {coords_func}")
+    os.system(f"{wb_command_cmd} -logging OFF -surface-normals {surface_filepath} {norms_func}")
 
     coords = np.asfarray(surface.load_surf_data(coords_func))
     norms = np.asfarray(surface.load_surf_data(norms_func))
@@ -344,9 +335,9 @@ def create_pseudo_metric_nifti_from_surface(surface_filepath: str) -> Tuple[nib.
     coords_mean_func = os.path.join(out_dir, f"{base}_coordinates_MEAN.func.gii")
     coords_mean_nii = os.path.join(out_dir, f"{base}_coordinates_MEAN.nii.gz")
 
-    os.system(f"wb_command -logging OFF -surface-coordinates-to-metric {surface_filepath} {coords_func}")
-    os.system(f"wb_command -logging OFF -metric-reduce {coords_func} MEAN {coords_mean_func}")
-    os.system(f"wb_command -logging OFF -metric-convert -to-nifti {coords_mean_func} {coords_mean_nii}")
+    os.system(f"{wb_command_cmd} -logging OFF -surface-coordinates-to-metric {surface_filepath} {coords_func}")
+    os.system(f"{wb_command_cmd} -logging OFF -metric-reduce {coords_func} MEAN {coords_mean_func}")
+    os.system(f"{wb_command_cmd} -logging OFF -metric-convert -to-nifti {coords_mean_func} {coords_mean_nii}")
 
     nii = image.load_img(coords_mean_nii)
     data = nii.get_fdata()
@@ -378,6 +369,7 @@ def create_metric_from_pseudo_nifti(metric_name: str,
     -------
     * ``{metric_name}_{surface_name}.func.gii`` (and a transient NIfTI)
     """
+    import os
     import nibabel as nib
 
     # out_dir, fname = os.path.split(surface_filepath)
@@ -400,43 +392,44 @@ def create_metric_from_pseudo_nifti(metric_name: str,
 
     # out_func = os.path.join(out_dir, f"{metric_name}_{surface_name}.func.gii")
     # os.system(
-    #     f"wb_command -logging OFF -metric-convert -from-nifti {tmp_nii} {surface_filepath} {out_func}"
+    #     f"{wb_command_cmd} -logging OFF -metric-convert -from-nifti {tmp_nii} {surface_filepath} {out_func}"
     # )
     # os.remove(tmp_nii)
-    
+
     output_path = os.path.split(surface_filepath)[0]
     surface_filename = os.path.split(surface_filepath)[1]
     surface_name = surface_filename.replace(".surf.gii", "")
-    
+
     nii, nii_data = create_pseudo_metric_nifti_from_surface(surface_filepath)
-    
+
     nii_data_tmp = nii_data.copy()
-    
+
     n = int(np.ceil(len(metric_values) / len(nii_data_tmp)))
-    
+
     for i in range(n):
         for j in range(len(nii_data_tmp)):
             try:
                 nii_data_tmp[j][i] = [metric_values[(i * len(nii_data_tmp) + j)]]
             except:
                 pass
-            
+
     nii_new = nib.nifti1.Nifti1Image(nii_data_tmp, nii.affine, header=nii.header)
-    
-    nii_new.to_filename(output_path + "/" + metric_name + "_" + surface_name + ".nii.gz")
-    
-    os.system("wb_command -logging OFF -metric-convert -from-nifti {} {} {}".format(
-        output_path + "/" + metric_name + "_" + surface_name + ".nii.gz",
+
+    nii_new.to_filename(output_path + os.sep + metric_name + "_" + surface_name + ".nii.gz")
+
+    os.system("'{}' -logging OFF -metric-convert -from-nifti '{}' '{}' '{}'".format(
+        wb_command_cmd,
+        output_path + os.sep + metric_name + "_" + surface_name + ".nii.gz",
         surface_filepath,
-        output_path + "/" + metric_name + "_" + surface_name + ".func.gii"))
-    
-    os.remove(output_path + "/" + metric_name + "_" + surface_name + ".nii.gz")
+        output_path + os.sep + metric_name + "_" + surface_name + ".func.gii"))
+
+    os.remove(output_path + os.sep + metric_name + "_" + surface_name + ".nii.gz")
 
 
 def erode_metric(metric_filepath: str, surface_filepath: str, erosion_factor: float) -> None:
     """Erode a metric on the surface using Workbench in-place."""
     os.system(
-        f"wb_command -logging OFF -metric-erode {metric_filepath} {surface_filepath} {erosion_factor} {metric_filepath}"
+        f"{wb_command_cmd} -logging OFF -metric-erode {metric_filepath} {surface_filepath} {erosion_factor} {metric_filepath}"
     )
 
 
@@ -559,7 +552,7 @@ def create_avoidance_mask(simnibs_mesh_filepath: str,
     # filled = ndimage.binary_fill_holes(vol, se_n)
     # filled_out = nib.Nifti1Image(filled.astype(np.uint16), aff)
     # nib.save(filled_out, filled_path)
-    os.system(f"wb_command -logging OFF -volume-fill-holes {bin_path} {filled_path}")
+    os.system(f"{wb_command_cmd} -logging OFF -volume-fill-holes {bin_path} {filled_path}")
 
     # ---- 3) get air-only mask = filled - bin
     air_path = os.path.join(out_dir, "final_tissues_air.nii.gz")
@@ -573,7 +566,7 @@ def create_avoidance_mask(simnibs_mesh_filepath: str,
     mesh_io.write_stl(mesh, air_stl)
 
     # Optional smoothing using Workbench (kept)
-    os.system(f"wb_command -logging OFF -surface-smoothing {air_gii} 0.5 10 {air_gii}")
+    os.system(f"{wb_command_cmd} -logging OFF -surface-smoothing {air_gii} 0.5 10 {air_gii}")
 
     # ---- 5) intersect inward normals from skin with air cavities
     skin_coords, skin_normals = compute_surface_metrics(surface_filepath)
@@ -603,8 +596,8 @@ def create_avoidance_mask(simnibs_mesh_filepath: str,
     # ears via EEG fiducials (LPA/RPA) shifted 15 mm posterior
     eeg_fids = os.path.join(m2m_dir, "eeg_positions", "Fiducials.csv")
     df = pd.read_csv(eeg_fids, header=1)
-    LPA = df.iloc[0, 1:4].to_numpy(float)
-    RPA = df.iloc[1, 1:4].to_numpy(float)
+    LPA = df.iloc[0, 1:4].to_numpy(np.float64)
+    RPA = df.iloc[1, 1:4].to_numpy(np.float64)
     LPA[1] -= 15
     RPA[1] -= 15
     avoidance_mask[np.linalg.norm((skin_coords - LPA), axis=1) < 15] = 0
@@ -702,7 +695,7 @@ def stl_from_nii(nii_filepath: str, threshold: float) -> None:
     4) Convert smoothed GIFTI back to STL
     """
     from simnibs import mesh_io
-    
+
     out_dir, in_name = os.path.split(nii_filepath)
     base = in_name.replace(".nii.gz", "").replace(".nii", "") + "_3Dmodel"
 
@@ -719,7 +712,7 @@ def stl_from_nii(nii_filepath: str, threshold: float) -> None:
     gii_path = os.path.join(out_dir, base + ".surf.gii")
     stl_path = os.path.join(out_dir, base + ".stl")
     _write_gifti_surface(verts, faces, gii_path)
-    os.system(f"wb_command -logging OFF -surface-smoothing {gii_path} 0.5 10 {gii_path}")
+    os.system(f"{wb_command_cmd} -logging OFF -surface-smoothing {gii_path} 0.5 10 {gii_path}")
 
     surf_gii_to_stl_with_simnibs(gii_path, stl_path)
 
@@ -743,7 +736,8 @@ def smooth_metric(metric_filepath: str, surface_filepath: str, FWHM: float) -> N
     out_dir, fname = os.path.split(metric_filepath)
     name = fname.replace(".func.gii", "")
     os.system(
-        "wb_command -logging OFF -metric-smoothing {} {} {} {} -fwhm".format(
+        "'{}' -logging OFF -metric-smoothing '{}' '{}' '{}' '{}' -fwhm".format(
+            wb_command_cmd,
             surface_filepath,
             metric_filepath,
             str(FWHM),
@@ -755,7 +749,7 @@ def smooth_metric(metric_filepath: str, surface_filepath: str, FWHM: float) -> N
 def mask_metric(metric_filepath: str, mask_filepath: str) -> None:
     """Apply a binary mask to a metric (in-place) via Workbench."""
     os.system(
-        f"wb_command -logging OFF -metric-mask {metric_filepath} {mask_filepath} {metric_filepath}"
+        f"{wb_command_cmd} -logging OFF -metric-mask {metric_filepath} {mask_filepath} {metric_filepath}"
     )
 
 
@@ -765,14 +759,14 @@ def threshold_metric(metric_filepath: str, threshold: float) -> None:
     name = fname.replace(".func.gii", "")
     out = os.path.join(out_dir, f"{name}_thresholded.func.gii")
     os.system(
-        f"wb_command -logging OFF -metric-math 'x < {threshold}' {out} -var x {metric_filepath}"
+        f"{wb_command_cmd} -logging OFF -metric-math 'x < {threshold}' {out} -var x {metric_filepath}"
     )
 
 
 def add_structure_information(filepath: str, structure_label: str) -> None:
     """Annotate a surface or metric with a Workbench structure label."""
     os.system(
-        f"wb_command -logging OFF -set-structure {filepath} {structure_label} -surface-type RECONSTRUCTION"
+        f"{wb_command_cmd} -logging OFF -set-structure {filepath} {structure_label} -surface-type RECONSTRUCTION"
     )
 
 
@@ -849,7 +843,7 @@ def transform_surface_model(surface_model_filepath: str,
                             structure: str) -> None:
     """Apply a 4×4 affine to a GIFTI surface model using Workbench."""
     os.system(
-        f"wb_command -logging OFF -surface-apply-affine {surface_model_filepath} {transform_filepath} {output_filepath}"
+        f"{wb_command_cmd} -logging OFF -surface-apply-affine {surface_model_filepath} {transform_filepath} {output_filepath}"
     )
     add_structure_information(output_filepath, structure)
 
@@ -895,9 +889,9 @@ def create_surface_ellipsoid(length: float, width: float,
     pixdim = ref.header["pixdim"][1:4]
 
     # radii in mm
-    a = shape[0] * pixdim[0] * (width / (shape[0] * pixdim[0])) / 2
-    b = shape[1] * pixdim[1] * (width / (shape[0] * pixdim[0])) / 2
-    c = shape[2] * pixdim[2] * (length / (shape[2] * pixdim[2])) / 2
+    a = float(shape[0]) * float(pixdim[0]) * (float(width) / (float(shape[0]) * float(pixdim[0]))) / 2
+    b = float(shape[1]) * float(pixdim[1]) * (float(width) / (float(shape[0]) * float(pixdim[0]))) / 2
+    c = float(shape[2]) * float(pixdim[2]) * (float(length) / (float(shape[2]) * float(pixdim[2]))) / 2
 
     phi = np.linspace(0, 2 * np.pi, 50)
     theta = np.linspace(0, np.pi, 50)
@@ -982,26 +976,26 @@ def compute_FLHM_for_focal_distance(focal_distance: float,
                                     flhm_list: Sequence[float]) -> float:
     """Compute expected FLHM from a calibration curve (cubic fit)."""
     if len(focal_distance_list) == 1 or len(flhm_list) == 1: # in the case of single-element transducers
-        
-        FLHM = flhm_list[0]
-    
+
+        FLHM = float(flhm_list[0])
+
     else: # in the case of steerable transducers
         import pandas as pd
         from scipy.optimize import curve_fit
-    
+
         df = pd.DataFrame({'Focal Distance': focal_distance_list, 'FLHM': flhm_list})
-    
+
         def cubic(x, a, b, c, d):
             return a + b * x + c * (x ** 2) + d * (x ** 3)
-    
+
         pars, _ = curve_fit(f=cubic,
                             xdata=df["Focal Distance"],
                             ydata=df["FLHM"],
                             p0=[0, 0, 0, 0],
                             bounds=[-np.inf, np.inf])
-    
+
         FLHM = float(pars[0] + pars[1] * focal_distance + pars[2] * focal_distance ** 2 + pars[3] * focal_distance ** 3)
-        
+
     return FLHM
 
 
@@ -1077,12 +1071,19 @@ def prepare_acoustic_simulation(vertex_number: int,
                                 transducer_surface_model_filepath: str,
                                 focal_distance_list: Sequence[float],
                                 flhm_list: Sequence[float],
-                                placement_scene_template_filepath: str) -> None:
+                                placement_scene_template_filepath: str,
+                                ID="",
+                                skip_wb_view=False,
+                                use_internal_viewer=False) -> None:
     """End-to-end preparation for one candidate vertex (simulation folder)."""
     import scipy
     from nilearn import image
 
-    output_path_vtx = os.path.join(output_path, f"vtx{vertex_number}")
+    if len(ID)==0:
+        suffix="vtx" + str(vertex_number)
+    else:
+        suffix = ID
+    output_path_vtx = os.path.join(output_path, suffix)
     os.makedirs(output_path_vtx, exist_ok=True)
 
     target_roi_filename = os.path.split(target_roi_filepath)[1]
@@ -1128,30 +1129,30 @@ def prepare_acoustic_simulation(vertex_number: int,
     transducer_center_coordinates = vertex_coordinates - ((offset + additional_offset) * vertex_vector)
     position_matrix_Localite = create_Localite_position_matrix(transducer_center_coordinates, vertex_vector)
 
-    scipy.io.savemat(os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_vtx{vertex_number}_Localite.mat"),
+    scipy.io.savemat(os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_{suffix}_Localite.mat"),
                      {'position_matrix': position_matrix_Localite})
-    np.savetxt(os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_vtx{vertex_number}_Localite.txt"),
+    np.savetxt(os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_{suffix}_Localite.txt"),
                position_matrix_Localite)
 
     xml = create_fake_XML_structure_for_Localite(position_matrix_Localite,
-                                                 f"transducer_position_{target_roi_name}_vtx{vertex_number}", 0, 0)
-    with open(os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_vtx{vertex_number}_Localite_XML.txt"), "a") as f:
+                                                 f"transducer_position_{target_roi_name}_{suffix}", 0, 0)
+    with open(os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_{suffix}_Localite_XML.txt"), "a") as f:
         f.write(xml)
 
     # --- Convert to k-Plan
     position_matrix_kPlan = convert_Localite_to_kPlan_position_matrix(position_matrix_Localite)
-    scipy.io.savemat(os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_vtx{vertex_number}_kPlan.mat"),
+    scipy.io.savemat(os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_{suffix}_kPlan.mat"),
                      {'position_matrix': position_matrix_kPlan})
-    np.savetxt(os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_vtx{vertex_number}_kPlan.txt"),
+    np.savetxt(os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_{suffix}_kPlan.txt"),
                position_matrix_kPlan)
 
     # --- Optional: transform transducer model
-    transform = np.loadtxt(os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_vtx{vertex_number}_kPlan.txt"))
+    transform = np.loadtxt(os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_{suffix}_kPlan.txt"))
     transform[0:3, 3] = transform[0:3, 3] * 1000  # back to mm for Workbench affine
-    transform_filepath = os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_vtx{vertex_number}_transducer.txt")
+    transform_filepath = os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_{suffix}_transducer.txt")
     np.savetxt(transform_filepath, transform)
 
-    transducer_out = os.path.join(output_path_vtx, f"transducer_{target_roi_name}_vtx{vertex_number}.surf.gii")
+    transducer_out = os.path.join(output_path_vtx, f"transducer_{target_roi_name}_{suffix}.surf.gii")
     if transducer_surface_model_filepath:
         transform_surface_model(transducer_surface_model_filepath, transform_filepath, transducer_out, "CEREBELLUM")
     else:
@@ -1160,8 +1161,8 @@ def prepare_acoustic_simulation(vertex_number: int,
 
     # --- .kps for k-Plan
     create_kps_file_for_kPlan(
-        os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_vtx{vertex_number}_kPlan.mat"),
-        f"{target_roi_name}_vtx{vertex_number}"
+        os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_{suffix}_kPlan.mat"),
+        f"{target_roi_name}_{suffix}"
     )
 
     # --- Focal distance & FLHM
@@ -1178,27 +1179,27 @@ def prepare_acoustic_simulation(vertex_number: int,
     FLHM = compute_FLHM_for_focal_distance(focal_distance, focal_distance_list, flhm_list)
 
     # --- Ellipsoid (surface)
-    focus_transform = np.loadtxt(os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_vtx{vertex_number}_kPlan.txt"))
+    focus_transform = np.loadtxt(os.path.join(output_path_vtx, f"position_matrix_{target_roi_name}_{suffix}_kPlan.txt"))
     focus_transform[0:3, 3] = focus_transform[0:3, 3] * 1000
     focus_transform[0:3, 3] = focus_transform[0:3, 3] + (vertex_vector * (offset + focal_distance))
 
-    focus_transform_path = os.path.join(output_path_vtx, f"focus_position_matrix_{target_roi_name}_vtx{vertex_number}.txt")
+    focus_transform_path = os.path.join(output_path_vtx, f"focus_position_matrix_{target_roi_name}_{suffix}.txt")
     np.savetxt(focus_transform_path, focus_transform)
 
-    ellipsoid_surf = os.path.join(output_path_vtx, f"focus_{target_roi_name}_vtx{vertex_number}_{round(focal_distance,1)}.surf.gii")
+    ellipsoid_surf = os.path.join(output_path_vtx, f"focus_{target_roi_name}_{suffix}_{round(focal_distance,1)}.surf.gii")
     create_surface_ellipsoid(FLHM, 5, focus_transform_path, t1_filepath, ellipsoid_surf)
 
     # --- Ellipsoid (volume) via Workbench ribbon mapping
-    ellipsoid_vol = os.path.join(output_path_vtx, f"focus_{target_roi_name}_vtx{vertex_number}_{round(focal_distance,1)}.nii.gz")
-    ellipsoid_small = os.path.join(output_path_vtx, f"focus_{target_roi_name}_vtx{vertex_number}_{round(focal_distance,1)}_small.surf.gii")
+    ellipsoid_vol = os.path.join(output_path_vtx, f"focus_{target_roi_name}_{suffix}_{round(focal_distance,1)}.nii.gz")
+    ellipsoid_small = os.path.join(output_path_vtx, f"focus_{target_roi_name}_{suffix}_{round(focal_distance,1)}_small.surf.gii")
     create_surface_ellipsoid(FLHM - 1, 4, focus_transform_path, t1_filepath, ellipsoid_small)
 
     focus_metric = os.path.join(output_path_vtx, "focus.func.gii")
-    os.system(f"wb_command -logging OFF -surface-coordinates-to-metric {ellipsoid_surf} {focus_metric}")
-    os.system("wb_command -logging OFF -metric-to-volume-mapping {} {} {} {} -ribbon-constrained {} {}".format(
-        focus_metric, ellipsoid_surf, t1_filepath, ellipsoid_vol, ellipsoid_small, ellipsoid_surf
+    os.system(f"{wb_command_cmd} -logging OFF -surface-coordinates-to-metric {ellipsoid_surf} {focus_metric}")
+    os.system("'{}' -logging OFF -metric-to-volume-mapping '{}' '{}' '{}' '{}' -ribbon-constrained '{}' '{}'".format(
+        wb_command_cmd, focus_metric, ellipsoid_surf, t1_filepath, ellipsoid_vol, ellipsoid_small, ellipsoid_surf
     ))
-    os.system(f"wb_command -logging OFF -volume-fill-holes {ellipsoid_vol} {ellipsoid_vol}")
+    os.system(f"{wb_command_cmd} -logging OFF -volume-fill-holes {ellipsoid_vol} {ellipsoid_vol}")
 
     # binarize first frame
     ell = image.load_img(ellipsoid_vol)
@@ -1211,32 +1212,51 @@ def prepare_acoustic_simulation(vertex_number: int,
     except OSError:
         pass
 
-    # --- Visualization scene
-    scene_variable_names = [
-        'SKIN_SURFACE_FILENAME', 'SKIN_SURFACE_FILEPATH',
-        'T1_FILENAME', 'T1_FILEPATH',
-        'MASK_FILENAME', 'MASK_FILEPATH',
-        'TRANSDUCER_SURFACE_FILENAME', 'TRANSDUCER_SURFACE_FILEPATH',
-        'FOCUS_VOLUME_FILENAME', 'FOCUS_VOLUME_FILEPATH',
-        'FOCUS_SURFACE_FILENAME', 'FOCUS_SURFACE_FILEPATH'
-    ]
+    # --- Visualize results
+    if skip_wb_view:
+        return
+    if use_internal_viewer:
+        from Viewer import FinalResultViewer
+        from PyQt5.QtWidgets import QDialog,QVBoxLayout
+        DlgResults=QDialog()
+        DlgResults.setWindowTitle("Trajectory Results")
 
-    scene_variable_values = [
-        'skin.surf.gii', '../skin.surf.gii',
-        'T1.nii.gz', '../../../T1.nii.gz',
-        target_roi_filename, f"../{target_roi_filename}",
-        f"transducer_{target_roi_name}_vtx{vertex_number}.surf.gii", f"./transducer_{target_roi_name}_vtx{vertex_number}.surf.gii",
-        f"focus_{target_roi_name}_vtx{vertex_number}_{round(focal_distance,1)}.nii.gz",
-        f"./focus_{target_roi_name}_vtx{vertex_number}_{round(focal_distance,1)}.nii.gz",
-        f"focus_{target_roi_name}_vtx{vertex_number}_{round(focal_distance,1)}.surf.gii",
-        f"./focus_{target_roi_name}_vtx{vertex_number}_{round(focal_distance,1)}.surf.gii"
-    ]
+        layout = QVBoxLayout()
+        DlgResults.setLayout(layout)
 
-    create_scene(placement_scene_template_filepath,
-                 os.path.join(output_path_vtx, "scene.scene"),
-                 scene_variable_names,
-                 scene_variable_values)
+        gifti_files = []
+        gifti_files.append(output_path+os.sep+'skin.surf.gii')
+        gifti_files.append(transducer_out)
 
-    # Launch viewer (optional)
-    os.system(f"wb_view -logging OFF {os.path.join(output_path_vtx, 'scene.scene')} &")
+        widget = FinalResultViewer(gifti_files)
+        layout.addWidget(widget)
+        DlgResults.resize(600, 600)
+        DlgResults.exec()
+    else:
+        scene_variable_names = [
+            'SKIN_SURFACE_FILENAME', 'SKIN_SURFACE_FILEPATH',
+            'T1_FILENAME', 'T1_FILEPATH',
+            'MASK_FILENAME', 'MASK_FILEPATH',
+            'TRANSDUCER_SURFACE_FILENAME', 'TRANSDUCER_SURFACE_FILEPATH',
+            'FOCUS_VOLUME_FILENAME', 'FOCUS_VOLUME_FILEPATH',
+            'FOCUS_SURFACE_FILENAME', 'FOCUS_SURFACE_FILEPATH'
+        ]
 
+        scene_variable_values = [
+            'skin.surf.gii', '../skin.surf.gii',
+            'T1.nii.gz', '../../../T1.nii.gz',
+            target_roi_filename, f"../{target_roi_filename}",
+            f"transducer_{target_roi_name}_{suffix}.surf.gii", f"./transducer_{target_roi_name}_{suffix}.surf.gii",
+            f"focus_{target_roi_name}_{suffix}_{round(focal_distance,1)}.nii.gz",
+            f"./focus_{target_roi_name}_{suffix}_{round(focal_distance,1)}.nii.gz",
+            f"focus_{target_roi_name}_{suffix}_{round(focal_distance,1)}.surf.gii",
+            f"./focus_{target_roi_name}_{suffix}_{round(focal_distance,1)}.surf.gii"
+        ]
+
+        create_scene(placement_scene_template_filepath,
+                     os.path.join(output_path_vtx, "scene.scene"),
+                     scene_variable_names,
+                     scene_variable_values)
+
+        # Launch viewer (optional)
+        os.system(f"wb_view -logging OFF {os.path.join(output_path_vtx, 'scene.scene')} &")
