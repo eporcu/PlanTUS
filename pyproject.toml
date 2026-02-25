@@ -27,7 +27,6 @@ license = "MIT"
 license-files = ["LICEN[CS]E*"]
 
 [project.scripts]
-# This allows you to run your project using the 'run-stats' command
 plantus = "PlanTUS.PlanTUS_cli:main"
 
 [project.urls]
