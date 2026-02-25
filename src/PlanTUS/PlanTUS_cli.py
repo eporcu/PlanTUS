@@ -29,20 +29,6 @@ import sys
 from pathlib import Path
 import yaml
 
-_IS_MAC = platform.system() == 'Darwin'
-
-#handy code to recover current path of Python script, works with Pyinstaller
-def resource_path():  # needed for bundling
-    """Get absolute path to resource, works for dev and for PyInstaller"""
-    if not _IS_MAC:
-        return os.path.split(Path(__file__))[0]
-
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        bundle_dir = Path(sys._MEIPASS)
-    else:
-        bundle_dir = Path(__file__).parent
-
-    return bundle_dir
 
 parser = argparse.ArgumentParser(description="PlanTUS command line interface")
 parser.add_argument("t1", type=str, help="Path to T1 image")
