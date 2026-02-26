@@ -10,7 +10,7 @@ compatibility and for BabelBrain usage.
 
 """
 import argparse
-import subprocess
+from PlanTUS.PlanTUS_cli import run
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PlanTUS wrapper")
@@ -24,13 +24,5 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    plantus_params = [ "plantus", args.t1, args.mesh, args.roi, args.config ]
-    if args.skip_wb_view:
-        plantus_params += ["--skip_wb_view"]
-    if args.use_internal_viewer:
-        plantus_params += ["--use_internal_viewer"]
-    if args.do_only_trajectory != -1:
-        plantus_params += ["do_only_trajectory"]
-
-    subprocess.run(plantus_params)
+    run(args)
 
