@@ -457,7 +457,7 @@ def run(args):
 
         if args.use_internal_viewer:
             from PyQt5.QtWidgets import QApplication,QDialog,QVBoxLayout
-            from Viewer import PrepareShowResults
+            from PlanTUS.Viewer import PrepareShowResults
 
             app = QApplication(sys.argv)
 
